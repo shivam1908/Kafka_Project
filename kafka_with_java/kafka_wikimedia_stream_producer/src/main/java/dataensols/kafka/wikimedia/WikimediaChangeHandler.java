@@ -7,6 +7,8 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 
+import java.util.concurrent.TimeUnit;
+
 public class WikimediaChangeHandler implements BackgroundEventHandler {
     KafkaProducer<String , String> kafkaProducer;
     String topic;
@@ -27,10 +29,11 @@ public class WikimediaChangeHandler implements BackgroundEventHandler {
     }
 
     @Override
-    public void onMessage(String s, MessageEvent messageEvent) {
+    public void onMessage(String s, MessageEvent messageEvent) throws InterruptedException {
         log.info(messageEvent.getData());
         //asynchronous
         kafkaProducer.send(new ProducerRecord<>(topic, messageEvent.getData()));
+        TimeUnit.SECONDS.sleep(1);
     }
 
     @Override

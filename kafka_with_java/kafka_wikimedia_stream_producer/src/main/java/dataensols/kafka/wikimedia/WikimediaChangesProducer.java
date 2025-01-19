@@ -11,9 +11,10 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import java.beans.EventHandler;
 import java.net.URI;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 public class WikimediaChangesProducer {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
 
         // setting bootstrap server
         String bootstrapServers = "127.0.0.1:9092";
@@ -37,5 +38,7 @@ public class WikimediaChangesProducer {
         BackgroundEventSource backgroundEventSource = backgroundgEventSourceBuilder.build();
         // to  start producer in another thread
         backgroundEventSource.start();
+        // to bloack main thread to wait 10 minutes for the background thread to produce to kafka
+        TimeUnit.SECONDS.sleep(30);
     }
 }
