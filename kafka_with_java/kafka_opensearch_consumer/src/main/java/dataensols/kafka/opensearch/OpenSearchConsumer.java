@@ -1,5 +1,6 @@
 package dataensols.kafka.opensearch;
 
+import com.google.gson.JsonParser;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
@@ -10,7 +11,10 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.opensearch.action.bulk.BulkRequest;
+import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.client.RequestOptions;
@@ -27,6 +31,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
+
 
 import static org.opensearch.client.RestClient.*;
 
@@ -76,11 +81,71 @@ public class OpenSearchConsumer {
         properties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,StringDeserializer.class.getName());
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG,groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,"latest");
+        properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,"false");
 
         return new KafkaConsumer<>(properties);
     }
 
+    private static String extractId(String json){
+            //gson library
 
+        return JsonParser.parseString(json)
+                .getAsJsonObject()
+                .get("meta")
+                .getAsJsonObject()
+                .get("id")
+                .getAsString();
+    }
+    public static void processRecords(KafkaConsumer<String, String> consumer,ConsumerRecords<String, String> records,Logger log,  RestHighLevelClient openSearchClient) throws IOException {
+        int recordCount = records.count();
+        log.info("Received " + recordCount + "record(s)");
+
+
+        BulkRequest bulkRequest = new BulkRequest();
+
+
+        for(ConsumerRecord<String, String> record : records){
+            //assign id to each record for idempotence
+            //String id = record.topic() +"_"+ record.partition() +"_"+record.offset();
+            //OR extract ID from meta
+            String id = extractId(record.value());
+            try {
+                // send record to  opensearch
+                IndexRequest indexRequest = new IndexRequest("wikimedia")
+                        .source(record.value(), XContentType.JSON).id(id);
+
+                //To receive the response for each msg processed
+//                        IndexResponse response = openSearchClient.index(indexRequest, RequestOptions.DEFAULT);
+                // To handle bulk of messages
+                bulkRequest.add(indexRequest);
+
+//                        log.info("Inserted at : " + response.getId());
+
+
+            }catch(Exception e){
+                log.error("Error processing record with ID: " + id ,e);
+            }
+        }
+        if(bulkRequest.numberOfActions() > 0){
+            BulkResponse bulkResponse =  openSearchClient.bulk(bulkRequest, RequestOptions.DEFAULT);
+            log.info("Inserted " +bulkResponse.getItems().length + "record(s).");
+            try{
+                Thread.sleep(1000);
+
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+
+            //To commit the offsets manually after the batch is consumed
+
+            consumer.commitSync();
+            log.info("Offests have been committed");
+
+
+        }
+
+
+    }
     public static void main(String[] args) throws IOException {
 
         Logger log = LoggerFactory.getLogger(OpenSearchConsumer.class.getSimpleName());
@@ -90,6 +155,23 @@ public class OpenSearchConsumer {
 
         //Create Kafka Client
         KafkaConsumer<String, String> consumer = createKafkaConsumer();
+
+        //get a reference to the main thread
+        final Thread mainThread = Thread.currentThread();
+
+        //adding the shutdown hook
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.info("Detected a shutdown , lets exit by calling consumer.wakeup()...");
+            consumer.wakeup();
+            //join the main thread to allow the execution of the code in the main thread
+
+            try{
+                mainThread.join();
+            }catch(InterruptedException e){
+                e.printStackTrace();
+            }
+
+        }));
 
         //create index on OpenSearch if it does not exist
         try(openSearchClient;consumer){
@@ -107,18 +189,29 @@ public class OpenSearchConsumer {
             while(true){
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(3000));
 
-                int recordCount = records.count();
-                log.info("Received " + recordCount + "record(s)");
+                //process the received Records
+                processRecords(consumer,records,log,openSearchClient);
 
-                for(ConsumerRecord<String, String> record : records){
-                    // send record to  opensearch
-                    IndexRequest indexRequest = new IndexRequest("wikimedia")
-                            .source(record.value(), XContentType.JSON);
-                    IndexResponse response = openSearchClient.index(indexRequest, RequestOptions.DEFAULT);
-                    log.info("Inserted at : "+ response.getId());
+            }
+            }catch(WakeupException e) {
+            log.info("Consumer is starting to  shut down");
+        }catch(Exception e) {
+            log.error("Unexpected exception in the consumer", e);
+        }finally{
+            try {
+                // Process any remaining records before closing the consumer
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(0));
+                if (!records.isEmpty()) {
+                    processRecords(consumer,records,log,openSearchClient);
+                    consumer.commitSync();
                 }
+            } catch (WakeupException e) {
+                // Ignore WakeupException during final processing
             }
-            }
+            consumer.close();
+            log.info("The consumer is now gracefully shut down");
+        }
+
 
 
     }
