@@ -16,9 +16,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexRequest;
-import org.opensearch.action.index.IndexResponse;
 import org.opensearch.client.RequestOptions;
-import org.opensearch.client.RestClient;
 import org.opensearch.client.RestHighLevelClient;
 import org.opensearch.client.indices.CreateIndexRequest;
 import org.opensearch.client.indices.GetIndexRequest;
@@ -209,6 +207,7 @@ public class OpenSearchConsumer {
                 // Ignore WakeupException during final processing
             }
             consumer.close();
+            openSearchClient.close();
             log.info("The consumer is now gracefully shut down");
         }
 

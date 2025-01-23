@@ -1,14 +1,12 @@
 package dataensols.kafka.wikimedia;
 
 import com.launchdarkly.eventsource.EventSource;
-import com.launchdarkly.eventsource.MessageEvent;
 import com.launchdarkly.eventsource.background.BackgroundEventHandler;
 import com.launchdarkly.eventsource.background.BackgroundEventSource;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
 
-import java.beans.EventHandler;
 import java.net.URI;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
